@@ -36,29 +36,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Load existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        checkOnboarding(session.user.id).finally(() => setIsLoading(false));
-      } else {
-        setIsLoading(false);
-      }
-    });
+    let mounted = true;
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+    // Load existing session
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (!mounted) return;
         setSession(session);
         if (session?.user) {
-          await checkOnboarding(session.user.id);
+          checkOnboarding(session.user.id).finally(() => {
+            if (mounted) setIsLoading(false);
+          });
+        } else {
+          setIsLoading(false);
+        }
+      })
+      .catch(() => {
+        // Never leave the app stuck on the loading screen.
+        if (mounted) setIsLoading(false);
+      });
+
+    // Listen for auth state changes.
+    // IMPORTANT: supabase-js holds an auth lock while this callback runs.
+    // Awaiting another supabase call here (e.g. a DB query) deadlocks on web,
+    // so we defer that work with setTimeout(0) to let the lock release first.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!mounted) return;
+        setSession(session);
+        if (session?.user) {
+          const userId = session.user.id;
+          setTimeout(() => { if (mounted) checkOnboarding(userId); }, 0);
         } else {
           setHasCompletedOnboarding(false);
         }
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [checkOnboarding]);
 
   const signIn = async (email: string, password: string) => {

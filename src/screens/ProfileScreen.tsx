@@ -5,9 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../services/supabase';
-import { savePushToken, scheduleDailyNotification, cancelAllNotifications } from '../services/notificationService';
+import { schedulePracticeNotification, cancelAllNotifications } from '../services/notificationService';
 import { getStreak } from '../services/streakService';
 import { Colors } from '../utils/colors';
+import { AuroraBackground } from '../components/AuroraBackground';
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -66,10 +67,11 @@ export function ProfileScreen() {
         .from('notification_preferences')
         .upsert({ user_id: user.id, enabled: false }, { onConflict: 'user_id' });
     } else {
-      await scheduleDailyNotification('Your affirmation is ready', notifTime);
       await supabase
         .from('notification_preferences')
         .upsert({ user_id: user.id, enabled: true, notification_time: notifTime }, { onConflict: 'user_id' });
+      // Daily practice-session reminder at the chosen time.
+      await schedulePracticeNotification(notifTime);
     }
   };
 
@@ -89,7 +91,7 @@ export function ProfileScreen() {
           { onConflict: 'user_id' }
         );
         if (notifEnabled) {
-          await scheduleDailyNotification('Your affirmation is ready', parsed);
+          await schedulePracticeNotification(parsed);
         }
         setNotifTime(parsed);
       }
@@ -115,6 +117,7 @@ export function ProfileScreen() {
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
+      <AuroraBackground subtle />
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           {/* Header */}

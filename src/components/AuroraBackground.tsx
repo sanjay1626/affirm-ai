@@ -54,23 +54,32 @@ function Particle({ x, delay, size }: { x: number; delay: number; size: number }
 
 interface Props {
   category?: string | null;
+  // `subtle` = calmer atmosphere for non-Home tabs: gentler veils, no particles.
+  subtle?: boolean;
 }
 
-export function AuroraBackground({ category }: Props) {
+export function AuroraBackground({ category, subtle = false }: Props) {
   const gradient = getGradient(category);
   const [layer1Colors, layer2Colors] = getAuroraOverlays(category);
 
-  // Aurora veil 1: breathes in 8s cycle
-  const a1 = useSharedValue(0.22);
+  // Softer opacity ranges than before for an overall lighter, gentler feel.
+  // Subtle variant is gentler still so content on the other tabs stays legible.
+  const v1Hi = subtle ? 0.16 : 0.40;
+  const v1Lo = subtle ? 0.06 : 0.12;
+  const v2Hi = subtle ? 0.12 : 0.28;
+  const v2Lo = subtle ? 0.04 : 0.08;
+
+  // Aurora veil 1: breathes
+  const a1 = useSharedValue(v1Lo);
   const a1s = useSharedValue(1);
-  // Aurora veil 2: counter-cycles at 11s, slightly faster drift
-  const a2 = useSharedValue(0.12);
+  // Aurora veil 2: counter-cycles
+  const a2 = useSharedValue(v2Lo);
 
   useEffect(() => {
     a1.value = withRepeat(
       withSequence(
-        withTiming(0.58, { duration: 8000, easing: Easing.inOut(Easing.sin) }),
-        withTiming(0.18, { duration: 8000, easing: Easing.inOut(Easing.sin) }),
+        withTiming(v1Hi, { duration: 8000, easing: Easing.inOut(Easing.sin) }),
+        withTiming(v1Lo, { duration: 8000, easing: Easing.inOut(Easing.sin) }),
       ),
       -1, false,
     );
@@ -83,12 +92,12 @@ export function AuroraBackground({ category }: Props) {
     );
     a2.value = withRepeat(
       withSequence(
-        withTiming(0.10, { duration: 5500, easing: Easing.inOut(Easing.sin) }),
-        withTiming(0.38, { duration: 5500, easing: Easing.inOut(Easing.sin) }),
+        withTiming(v2Hi, { duration: 5500, easing: Easing.inOut(Easing.sin) }),
+        withTiming(v2Lo, { duration: 5500, easing: Easing.inOut(Easing.sin) }),
       ),
       -1, false,
     );
-  }, [category]);
+  }, [category, subtle]);
 
   const s1 = useAnimatedStyle(() => ({
     opacity: a1.value,
@@ -132,12 +141,16 @@ export function AuroraBackground({ category }: Props) {
         style={styles.vignette}
       />
 
-      {/* Floating particles */}
-      <Particle x={W * 0.15} delay={0}    size={3} />
-      <Particle x={W * 0.35} delay={2200} size={2} />
-      <Particle x={W * 0.55} delay={4400} size={3} />
-      <Particle x={W * 0.72} delay={1100} size={2} />
-      <Particle x={W * 0.88} delay={3300} size={2} />
+      {/* Floating particles — Home/Category only */}
+      {!subtle && (
+        <>
+          <Particle x={W * 0.15} delay={0}    size={3} />
+          <Particle x={W * 0.35} delay={2200} size={2} />
+          <Particle x={W * 0.55} delay={4400} size={3} />
+          <Particle x={W * 0.72} delay={1100} size={2} />
+          <Particle x={W * 0.88} delay={3300} size={2} />
+        </>
+      )}
     </View>
   );
 }

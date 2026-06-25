@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  FlatList, StatusBar, Dimensions, Share, ActivityIndicator,
+  StatusBar, Dimensions, Share, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -9,115 +9,22 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { DiscoverStackParamList } from '../navigation/MainTabNavigator';
-import { generateAffirmation, addToFavorites, removeFromFavorites } from '../services/affirmationService';
+import {
+  generateTriad, addToFavorites, createAffirmationFromLibrary, incrementLibrarySave,
+  type TriadResult, type LibraryLine,
+} from '../services/affirmationService';
+import { schedulePracticeNotification } from '../services/notificationService';
+import { setDailyPractice } from '../services/practiceService';
 import { speakText, stopSpeaking, ttsAvailable } from '../utils/speech';
 import { hapticLight, hapticSuccess } from '../utils/haptics';
 import { AuroraBackground } from '../components/AuroraBackground';
+import { AutoFitText } from '../components/AutoFitText';
+import { ReflectionPanel } from '../components/ReflectionPanel';
 
 const { width: W, height: H } = Dimensions.get('window');
 type Route = RouteProp<DiscoverStackParamList, 'Category'>;
 
-interface CatAffirm {
-  id: string;
-  text: string;
-  reflection?: string;
-}
-
-// ── Single category affirmation page ──────────────────────────────────────────
-
-function AffirmPage({
-  item, saved, speaking, onSave, onSpeak, onShare, category,
-}: {
-  item: CatAffirm;
-  saved: boolean;
-  speaking: boolean;
-  onSave: () => void;
-  onSpeak: () => void;
-  onShare: () => void;
-  category: string;
-}) {
-  const textOpacity = useSharedValue(0);
-  const textY = useSharedValue(16);
-
-  useEffect(() => {
-    textOpacity.value = 0; textY.value = 16;
-    textOpacity.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.ease) });
-    textY.value = withTiming(0, { duration: 600, easing: Easing.out(Easing.ease) });
-  }, [item.id]);
-
-  const style = useAnimatedStyle(() => ({
-    opacity: textOpacity.value,
-    transform: [{ translateY: textY.value }],
-  }));
-
-  const fs = item.text.length < 60 ? 42 : item.text.length < 100 ? 36 : item.text.length < 150 ? 32 : 28;
-  const lh = Math.round(fs * 1.52);
-
-  return (
-    <View style={{ width: W, height: H }}>
-      <AuroraBackground key={category} category={category} />
-      <Animated.View style={[aphStyles.wrap, style]}>
-        <TouchableOpacity
-          onPress={onSpeak}
-          onLongPress={onSave}
-          delayLongPress={500}
-          activeOpacity={0.95}
-        >
-          <Text style={[aphStyles.text, { fontSize: fs, lineHeight: lh }]}>{item.text}</Text>
-        </TouchableOpacity>
-        <Text style={aphStyles.hint}>
-          {ttsAvailable ? 'Tap to hear · Hold to save' : 'Hold to save'}
-        </Text>
-      </Animated.View>
-
-      {/* Actions */}
-      <View style={aphStyles.actions}>
-        <TouchableOpacity style={aphStyles.actionBtn} onPress={onSave} activeOpacity={0.7}>
-          <Text style={[aphStyles.actionSym, saved && aphStyles.actionSaved]}>{saved ? '♥' : '♡'}</Text>
-        </TouchableOpacity>
-        {ttsAvailable && (
-          <TouchableOpacity style={aphStyles.actionBtn} onPress={onSpeak} activeOpacity={0.7}>
-            <Text style={[aphStyles.actionSym, speaking && aphStyles.actionSaved]}>{speaking ? '◼' : '♪'}</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={aphStyles.actionBtn} onPress={onShare} activeOpacity={0.7}>
-          <Text style={aphStyles.actionSym}>↑</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
-const aphStyles = StyleSheet.create({
-  wrap: {
-    flex: 1, justifyContent: 'center',
-    paddingHorizontal: 36, paddingVertical: 20,
-    gap: 18,
-  },
-  text: {
-    fontWeight: '200', fontStyle: 'italic',
-    color: 'rgba(255,255,255,0.94)',
-    textAlign: 'center', letterSpacing: 0.5,
-  },
-  hint: {
-    fontSize: 10, color: 'rgba(255,255,255,0.22)',
-    textAlign: 'center', letterSpacing: 1.2,
-  },
-  actions: {
-    flexDirection: 'row', justifyContent: 'center', gap: 32,
-    paddingBottom: 24,
-  },
-  actionBtn: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  actionSym: { fontSize: 18, color: 'rgba(255,255,255,0.60)' },
-  actionSaved: { color: 'rgba(255,255,255,0.95)' },
-});
-
-// ── CategoryScreen ─────────────────────────────────────────────────────────────
+const keyOf = (line: LibraryLine) => line.library_id ?? line.text;
 
 export function CategoryScreen() {
   const nav = useNavigation();
@@ -125,174 +32,269 @@ export function CategoryScreen() {
   const insets = useSafeAreaInsets();
   const { categoryId, categoryLabel } = route.params;
 
-  const [items, setItems] = useState<CatAffirm[]>([]);
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [triad, setTriad] = useState<TriadResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const flatListRef = useRef<FlatList>(null);
+  const [availH, setAvailH] = useState(0);
+  const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
+  const [practiceSet, setPracticeSet] = useState(false);
+  const [speakingKey, setSpeakingKey] = useState<string | null>(null);
 
-  const generate = useCallback(async () => {
+  const fade = useSharedValue(0);
+  const slide = useSharedValue(14);
+
+  const loadTriad = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await generateAffirmation('extra');
-      const r = result as any;
-      const item: CatAffirm = {
-        id: r.id ?? String(Date.now()),
-        text: result.affirmation_text,
-        reflection: r.reflection ?? result.reason,
-      };
-      setItems(prev => [...prev, item]);
-      const nextIdx = items.length;
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: nextIdx, animated: true });
-        setCurrentIndex(nextIdx);
-      }, 150);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
-  }, [items.length]);
-
-  useEffect(() => { generate(); }, []);
-
-  const handleSave = async (item: CatAffirm) => {
-    if (savedIds.has(item.id)) {
-      await removeFromFavorites(item.id);
-      setSavedIds(prev => { const s = new Set(prev); s.delete(item.id); return s; });
-    } else {
-      hapticSuccess();
-      await addToFavorites(item.id, item.text);
-      setSavedIds(prev => new Set(prev).add(item.id));
-    }
-  };
-
-  const handleSpeak = (item: CatAffirm) => {
-    hapticLight();
-    if (speakingId === item.id) {
+      const t = await generateTriad(categoryId);
+      setTriad(t);
+      setSavedKeys(new Set());
+      setPracticeSet(false);
+      setSpeakingKey(null);
       stopSpeaking();
-      setSpeakingId(null);
+      fade.value = 0; slide.value = 14;
+      fade.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.ease) });
+      slide.value = withTiming(0, { duration: 600, easing: Easing.out(Easing.ease) });
+    } catch {
+      // leave previous triad in place
+    } finally {
+      setLoading(false);
+    }
+  }, [categoryId]);
+
+  useEffect(() => { loadTriad(); }, [loadTriad]);
+
+  const handleSpeak = (line: LibraryLine) => {
+    if (!ttsAvailable) return;
+    hapticLight();
+    const k = keyOf(line);
+    if (speakingKey === k) {
+      stopSpeaking();
+      setSpeakingKey(null);
     } else {
-      setSpeakingId(item.id);
-      speakText(item.text, () => setSpeakingId(null));
+      setSpeakingKey(k);
+      speakText(line.text, () => setSpeakingKey(null));
     }
   };
 
-  const handleShare = async (item: CatAffirm) => {
-    await Share.share({ message: `"${item.text}"\n\n— AffirmAI` });
+  const handleSave = async (line: LibraryLine) => {
+    const k = keyOf(line);
+    if (savedKeys.has(k)) return; // add-only (popularity signal)
+    hapticSuccess();
+    setSavedKeys(prev => new Set(prev).add(k));
+    const id = await createAffirmationFromLibrary({
+      text: line.text, library_id: line.library_id, category: categoryId, reflection: triad?.reflection,
+    });
+    if (id) await addToFavorites(id, line.text);
+    await incrementLibrarySave(line.library_id);
   };
+
+  const handleShare = async (line: LibraryLine) => {
+    await Share.share({ message: `"${line.text}"\n\n— AffirmAI` });
+  };
+
+  const handlePracticeAnchor = async () => {
+    if (!triad || practiceSet) return;
+    hapticSuccess();
+    setPracticeSet(true);
+    const anchor = triad.anchor;
+    const id = await createAffirmationFromLibrary({
+      text: anchor.text, library_id: anchor.library_id, category: categoryId, reflection: triad.reflection,
+    });
+    await setDailyPractice(anchor.text, id ?? undefined, anchor.library_id);
+    await schedulePracticeNotification();
+  };
+
+  const heroStyle = useAnimatedStyle(() => ({
+    opacity: fade.value,
+    transform: [{ translateY: slide.value }],
+  }));
+
+  const anchor = triad?.anchor;
+  const anchorSaved = anchor ? savedKeys.has(keyOf(anchor)) : false;
+  const textAvailable = availH > 0 ? Math.max(0, availH - 64) : 0;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#09090F' }}>
+    <View style={styles.root}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <AuroraBackground category={categoryId} />
 
-      {items.length === 0 && loading ? (
-        <View style={{ flex: 1 }}>
-          <AuroraBackground category={categoryId} />
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 20 }}>
-            <ActivityIndicator color="rgba(255,255,255,0.55)" size="large" />
-            <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.36)', letterSpacing: 0.3 }}>
-              Creating your affirmation…
-            </Text>
-          </View>
-        </View>
-      ) : (
-        <FlatList
-          ref={flatListRef}
-          data={items}
-          keyExtractor={item => item.id}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          bounces={false}
-          onMomentumScrollEnd={e => {
-            const idx = Math.round(e.nativeEvent.contentOffset.x / W);
-            setCurrentIndex(idx);
-            stopSpeaking();
-            setSpeakingId(null);
-          }}
-          renderItem={({ item }) => (
-            <AffirmPage
-              item={item}
-              saved={savedIds.has(item.id)}
-              speaking={speakingId === item.id}
-              category={categoryId}
-              onSave={() => handleSave(item)}
-              onSpeak={() => handleSpeak(item)}
-              onShare={() => handleShare(item)}
-            />
-          )}
-          getItemLayout={(_, i) => ({ length: W, offset: W * i, index: i })}
-        />
-      )}
-
-      {/* Back button overlay */}
-      <View style={[csStyles.topOverlay, { paddingTop: insets.top + 12 }]} pointerEvents="box-none">
-        <TouchableOpacity style={csStyles.backBtn} onPress={() => nav.goBack()} activeOpacity={0.7}>
-          <Text style={csStyles.backText}>←</Text>
+      {/* Top bar */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => nav.goBack()} activeOpacity={0.7}>
+          <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
-        <Text style={csStyles.catLabel}>{categoryLabel.toUpperCase()}</Text>
+        <Text style={styles.catLabel}>{categoryLabel.toUpperCase()}</Text>
         <View style={{ width: 44 }} />
       </View>
 
-      {/* Bottom: dots + generate more */}
-      <View style={[csStyles.bottom, { paddingBottom: (insets.bottom || 0) + 100 }]} pointerEvents="box-none">
-        {/* Dots */}
-        {items.length > 1 && (
-          <View style={csStyles.dots}>
-            {items.map((_, i) => (
-              <View key={i} style={[csStyles.dot, i === currentIndex && csStyles.dotActive]} />
-            ))}
-          </View>
-        )}
-        <TouchableOpacity
-          style={csStyles.moreBtn}
-          onPress={generate}
-          disabled={loading}
-          activeOpacity={0.75}
-        >
-          {loading
-            ? <ActivityIndicator color="rgba(255,255,255,0.60)" size="small" />
-            : <Text style={csStyles.moreBtnText}>Another one</Text>
-          }
-        </TouchableOpacity>
-      </View>
+      {!triad ? (
+        <View style={styles.centre}>
+          <ActivityIndicator color="rgba(255,255,255,0.55)" size="large" />
+          <Text style={styles.loadingText}>Gathering your set…</Text>
+        </View>
+      ) : (
+        <>
+          {/* Anchor hero */}
+          <Animated.View
+            style={[styles.hero, heroStyle]}
+            onLayout={e => setAvailH(e.nativeEvent.layout.height)}
+          >
+            <Text style={styles.anchorCaption}>ANCHOR</Text>
+            <TouchableOpacity
+              activeOpacity={0.95}
+              onPress={() => anchor && handleSpeak(anchor)}
+              onLongPress={() => anchor && handleSave(anchor)}
+              delayLongPress={500}
+            >
+              <AutoFitText
+                text={anchor!.text}
+                available={textAvailable}
+                maxSize={40} minSize={22} lineHeightRatio={1.5}
+                style={styles.anchorText}
+              />
+            </TouchableOpacity>
+            <Text style={styles.hint}>
+              {ttsAvailable ? 'Tap to hear · Hold to save' : 'Hold to save'}
+            </Text>
+          </Animated.View>
+
+          {/* Bottom cluster */}
+          <Animated.View style={[styles.cluster, heroStyle, { paddingBottom: insets.bottom + 90 }]}>
+            {/* Anchor actions */}
+            <View style={styles.actions}>
+              <ActionBtn symbol={anchorSaved ? '♥' : '♡'} active={anchorSaved} onPress={() => anchor && handleSave(anchor)} />
+              {ttsAvailable && (
+                <ActionBtn symbol={speakingKey === (anchor && keyOf(anchor)) ? '◼' : '♪'} active={speakingKey === (anchor && keyOf(anchor))} onPress={() => anchor && handleSpeak(anchor)} />
+              )}
+              <ActionBtn symbol="↑" onPress={() => anchor && handleShare(anchor)} />
+            </View>
+
+            {/* Daily practice — Anchor only */}
+            <TouchableOpacity
+              style={[styles.practiceBtn, practiceSet && styles.practiceBtnSet]}
+              onPress={handlePracticeAnchor}
+              disabled={practiceSet}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.practiceText, practiceSet && styles.practiceTextSet]}>
+                {practiceSet ? '✓ Your daily practice' : 'Use Anchor for daily practice'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Companions */}
+            <Text style={styles.companionCaption}>ALSO FOR YOU</Text>
+            {triad.companions.map((c) => {
+              const k = keyOf(c);
+              return (
+                <TouchableOpacity
+                  key={k}
+                  style={styles.companionRow}
+                  activeOpacity={0.8}
+                  onPress={() => handleSpeak(c)}
+                  onLongPress={() => handleSave(c)}
+                  delayLongPress={500}
+                >
+                  <Text style={styles.companionText} numberOfLines={2}>{c.text}</Text>
+                  <Text style={[styles.companionMark, savedKeys.has(k) && styles.companionMarkSaved]}>
+                    {savedKeys.has(k) ? '♥' : '♡'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* One triad reflection */}
+            <ReflectionPanel reflection={triad.reflection} />
+
+            {/* Another set */}
+            <TouchableOpacity style={styles.moreBtn} onPress={loadTriad} disabled={loading} activeOpacity={0.75}>
+              {loading
+                ? <ActivityIndicator color="rgba(255,255,255,0.60)" size="small" />
+                : <Text style={styles.moreBtnText}>Another set</Text>}
+            </TouchableOpacity>
+          </Animated.View>
+        </>
+      )}
     </View>
   );
 }
 
-const csStyles = StyleSheet.create({
-  topOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0,
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-  },
-  backBtn: {
-    width: 44, height: 44, alignItems: 'center', justifyContent: 'center',
-  },
-  backText: { fontSize: 26, color: 'rgba(255,255,255,0.70)' },
-  catLabel: {
-    fontSize: 10, fontWeight: '700',
-    color: 'rgba(255,255,255,0.40)',
-    letterSpacing: 3,
-  },
+function ActionBtn({ symbol, onPress, active }: { symbol: string; onPress: () => void; active?: boolean }) {
+  return (
+    <TouchableOpacity style={styles.actionBtn} onPress={onPress} activeOpacity={0.7}>
+      <Text style={[styles.actionSym, active && styles.actionSymActive]}>{symbol}</Text>
+    </TouchableOpacity>
+  );
+}
 
-  bottom: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    alignItems: 'center', gap: 14,
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#09090F' },
+
+  topBar: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingBottom: 10,
   },
-  dots: { flexDirection: 'row', gap: 5 },
-  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.22)' },
-  dotActive: { backgroundColor: 'rgba(255,255,255,0.80)', width: 14, borderRadius: 3 },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  backArrow: { fontSize: 26, color: 'rgba(255,255,255,0.70)' },
+  catLabel: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.40)', letterSpacing: 3 },
+
+  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  loadingText: { fontSize: 14, color: 'rgba(255,255,255,0.36)', letterSpacing: 0.3 },
+
+  hero: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 34, paddingTop: 80, gap: 14,
+  },
+  anchorCaption: {
+    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.32)', letterSpacing: 3,
+  },
+  anchorText: {
+    fontWeight: '200', fontStyle: 'italic', color: 'rgba(255,255,255,0.95)',
+    textAlign: 'center', letterSpacing: 0.5,
+  },
+  hint: { fontSize: 10, color: 'rgba(255,255,255,0.22)', textAlign: 'center', letterSpacing: 1.2 },
+
+  cluster: { gap: 14, paddingHorizontal: 0 },
+
+  actions: { flexDirection: 'row', justifyContent: 'center', gap: 30 },
+  actionBtn: {
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  actionSym: { fontSize: 18, color: 'rgba(255,255,255,0.60)' },
+  actionSymActive: { color: 'rgba(255,255,255,0.95)' },
+
+  practiceBtn: {
+    alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 22, borderRadius: 999,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  practiceBtnSet: { borderColor: 'rgba(140,200,160,0.45)', backgroundColor: 'rgba(120,200,150,0.12)' },
+  practiceText: { fontSize: 13, fontWeight: '500', color: 'rgba(255,255,255,0.78)', letterSpacing: 0.4 },
+  practiceTextSet: { color: 'rgba(180,230,200,0.95)' },
+
+  companionCaption: {
+    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.30)', letterSpacing: 3,
+    textAlign: 'center', marginTop: 2,
+  },
+  companionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 24, paddingVertical: 12, paddingHorizontal: 16,
+    borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  companionText: {
+    flex: 1, fontSize: 15, fontWeight: '300', fontStyle: 'italic',
+    color: 'rgba(255,255,255,0.82)', letterSpacing: 0.2,
+  },
+  companionMark: { fontSize: 16, color: 'rgba(255,255,255,0.35)' },
+  companionMarkSaved: { color: 'rgba(255,255,255,0.95)' },
 
   moreBtn: {
-    paddingVertical: 14, paddingHorizontal: 44,
-    borderRadius: 999, minWidth: 150, alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
+    alignSelf: 'center', paddingVertical: 14, paddingHorizontal: 44, borderRadius: 999,
+    minWidth: 150, alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
   },
-  moreBtnText: {
-    fontSize: 15, fontWeight: '400',
-    color: 'rgba(255,255,255,0.78)',
-    letterSpacing: 0.5,
-  },
+  moreBtnText: { fontSize: 15, fontWeight: '400', color: 'rgba(255,255,255,0.78)', letterSpacing: 0.5 },
 });

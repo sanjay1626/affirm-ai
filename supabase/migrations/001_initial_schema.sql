@@ -57,7 +57,7 @@ create trigger on_auth_user_created
 -- Stores the user's onboarding preferences
 -- ============================================================
 create table if not exists public.onboarding_answers (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default gen_random_uuid(),
   user_id           uuid not null references auth.users(id) on delete cascade,
   preferred_name    text not null,
   main_goals        text[] default '{}',
@@ -86,7 +86,7 @@ create policy "Users can manage their own onboarding answers"
 -- AI-generated affirmations stored per user per day
 -- ============================================================
 create table if not exists public.affirmations (
-  id               uuid primary key default uuid_generate_v4(),
+  id               uuid primary key default gen_random_uuid(),
   user_id          uuid not null references auth.users(id) on delete cascade,
   affirmation_text text not null,
   category         text,
@@ -111,7 +111,7 @@ create policy "Users can manage their own affirmations"
 -- AI-generated or curated daily quotes
 -- ============================================================
 create table if not exists public.quotes (
-  id           uuid primary key default uuid_generate_v4(),
+  id           uuid primary key default gen_random_uuid(),
   user_id      uuid not null references auth.users(id) on delete cascade,
   quote_text   text not null,
   quote_author text,
@@ -134,7 +134,7 @@ create policy "Users can manage their own quotes"
 -- User's daily mood check-ins
 -- ============================================================
 create table if not exists public.mood_logs (
-  id         uuid primary key default uuid_generate_v4(),
+  id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references auth.users(id) on delete cascade,
   mood       integer not null check (mood >= 1 and mood <= 5),
   mood_label text,
@@ -157,7 +157,7 @@ create policy "Users can manage their own mood logs"
 -- User's private journal entries
 -- ============================================================
 create table if not exists public.journal_entries (
-  id         uuid primary key default uuid_generate_v4(),
+  id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references auth.users(id) on delete cascade,
   title      text,
   body       text not null,
@@ -179,7 +179,7 @@ create policy "Users can manage their own journal entries"
 -- Affirmations the user has starred
 -- ============================================================
 create table if not exists public.favorites (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null references auth.users(id) on delete cascade,
   affirmation_id  uuid references public.affirmations(id) on delete cascade,
   affirmation_text text not null,
@@ -203,7 +203,7 @@ create policy "Users can manage their own favorites"
 -- Stores push token + scheduling preferences
 -- ============================================================
 create table if not exists public.notification_preferences (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default gen_random_uuid(),
   user_id           uuid not null references auth.users(id) on delete cascade,
   expo_push_token   text,
   notification_time text default '08:00',

@@ -11,7 +11,7 @@ import { Button } from '../../components/Button';
 import { Colors } from '../../utils/colors';
 import { Spacing, Radius } from '../../utils/spacing';
 import {
-  registerForPushNotifications, savePushToken, scheduleDailyNotification,
+  registerForPushNotifications, savePushToken, schedulePracticeNotification,
 } from '../../services/notificationService';
 
 interface OnboardingData {
@@ -131,10 +131,8 @@ export function OnboardingFlow() {
       const token = await registerForPushNotifications();
       if (token) {
         await savePushToken(token, data.notification_time, data.frequency);
-        await scheduleDailyNotification(
-          `Good morning, ${data.preferred_name}! Your daily affirmation is ready. ✨`,
-          data.notification_time
-        );
+        // Schedule the daily practice-session reminder at their chosen time.
+        await schedulePracticeNotification(data.notification_time);
       }
       await refreshOnboardingStatus();
     } catch (e: unknown) {

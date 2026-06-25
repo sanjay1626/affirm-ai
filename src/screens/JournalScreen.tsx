@@ -9,6 +9,7 @@ import { logMood, getTodaysMood, MOOD_LABELS, MOOD_EMOJIS } from '../services/mo
 import { createJournalEntry, getJournalEntries, type JournalEntry } from '../services/journalService';
 import { Colors } from '../utils/colors';
 import { supabase } from '../services/supabase';
+import { AuroraBackground } from '../components/AuroraBackground';
 
 // ── AI insight via edge function ───────────────────────────────────────────────
 
@@ -17,8 +18,9 @@ async function getJournalInsight(recentEntries: string[]): Promise<string> {
   const { data, error } = await supabase.functions.invoke('generate-affirmation', {
     body: { type: 'journal_insight', journalContext: combined },
   });
-  if (error || !data?.affirmation_text) throw new Error('Could not get insight');
-  return data.affirmation_text as string;
+  const text = data?.insight ?? data?.affirmation_text;
+  if (error || !text) throw new Error('Could not get insight');
+  return text as string;
 }
 
 // ── Mood picker ────────────────────────────────────────────────────────────────
@@ -132,6 +134,7 @@ export function JournalScreen() {
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
+      <AuroraBackground subtle />
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <KeyboardAvoidingView
           style={{ flex: 1 }}

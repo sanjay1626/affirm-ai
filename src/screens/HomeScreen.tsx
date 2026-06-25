@@ -14,9 +14,10 @@ import {
   generateAffirmation, addToFavorites, removeFromFavorites,
   isFavorited, getAffirmationsForDate, type Affirmation,
 } from '../services/affirmationService';
-import { scheduleDailyNotification } from '../services/notificationService';
 import { AuroraBackground } from '../components/AuroraBackground';
+import { AutoFitText } from '../components/AutoFitText';
 import { BreathingGate } from '../components/BreathingGate';
+import { ReflectionPanel } from '../components/ReflectionPanel';
 import { speakText, stopSpeaking, isSpeakingAsync, ttsAvailable } from '../utils/speech';
 import { hapticLight, hapticSuccess } from '../utils/haptics';
 
@@ -28,85 +29,6 @@ interface AffirmItem extends Affirmation {
   reflection?: string;
   source?: string;
 }
-
-function affirmFontSize(text: string): number {
-  const len = text.length;
-  if (len < 50)  return 46;
-  if (len < 80)  return 42;
-  if (len < 110) return 38;
-  if (len < 150) return 34;
-  return 30;
-}
-
-// ── AI Reflection panel ────────────────────────────────────────────────────────
-
-function ReflectionPanel({ reflection }: { reflection?: string }) {
-  const [open, setOpen] = useState(false);
-  const height = useSharedValue(0);
-
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    height.value = withTiming(next ? 140 : 0, { duration: 320, easing: Easing.out(Easing.ease) });
-  };
-
-  const bodyStyle = useAnimatedStyle(() => ({ height: height.value, overflow: 'hidden' }));
-
-  if (!reflection) return null;
-
-  return (
-    <View style={rStyles.wrap}>
-      <TouchableOpacity style={rStyles.trigger} onPress={toggle} activeOpacity={0.8}>
-        <View style={rStyles.triggerLeft}>
-          <Text style={rStyles.icon}>◈</Text>
-          <Text style={rStyles.triggerLabel}>Your AI reflection</Text>
-        </View>
-        <Text style={rStyles.chevron}>{open ? '↑' : '↓'}</Text>
-      </TouchableOpacity>
-
-      <Animated.View style={bodyStyle}>
-        <View style={rStyles.body}>
-          <Text style={rStyles.bodyText}>{reflection}</Text>
-        </View>
-      </Animated.View>
-    </View>
-  );
-}
-
-const rStyles = StyleSheet.create({
-  wrap: {
-    marginHorizontal: 24,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  trigger: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18, paddingVertical: 14,
-  },
-  triggerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  icon: { fontSize: 14, color: 'rgba(255,255,255,0.55)' },
-  triggerLabel: {
-    fontSize: 13, fontWeight: '500',
-    color: 'rgba(255,255,255,0.65)',
-    letterSpacing: 0.3,
-  },
-  chevron: {
-    fontSize: 14, color: 'rgba(255,255,255,0.40)',
-  },
-  body: {
-    paddingHorizontal: 18, paddingBottom: 18, paddingTop: 4,
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)',
-  },
-  bodyText: {
-    fontSize: 14, fontWeight: '400',
-    color: 'rgba(255,255,255,0.72)',
-    lineHeight: 22, fontStyle: 'italic',
-  },
-});
 
 // ── Action bar ─────────────────────────────────────────────────────────────────
 
@@ -190,6 +112,7 @@ function AffirmationPage({
   onSave, onLongPressSave, onSpeak, onRegenerate, onShare,
 }: PageProps) {
   const insets = useSafeAreaInsets();
+  const [availH, setAvailH] = useState(0);
   const textOpacity = useSharedValue(0);
   const textY = useSharedValue(20);
   const saveScale = useSharedValue(1);
@@ -219,8 +142,8 @@ function AffirmationPage({
     transform: [{ scale: saveScale.value }],
   }));
 
-  const fs = affirmFontSize(item.affirmation_text);
-  const lh = Math.round(fs * 1.52);
+  // Reserve room for the vertical padding (24), the gap (20) and the hint (~18).
+  const textAvailable = availH > 0 ? Math.max(0, availH - 62) : 0;
 
   const topPad = insets.top > 0 ? insets.top + 4 : 20;
   const bottomPad = (insets.bottom > 0 ? insets.bottom : 0) + 96;
@@ -242,8 +165,11 @@ function AffirmationPage({
         ) : null}
       </View>
 
-      {/* Affirmation — dominates screen, centered in available space */}
-      <Animated.View style={[pageStyles.affirmWrap, textStyle]}>
+      {/* Affirmation — dominates screen, centered, auto-fit to available space */}
+      <Animated.View
+        style={[pageStyles.affirmWrap, textStyle]}
+        onLayout={e => setAvailH(e.nativeEvent.layout.height)}
+      >
         <Animated.View style={saveStyle}>
           <TouchableOpacity
             activeOpacity={0.95}
@@ -251,13 +177,18 @@ function AffirmationPage({
             onLongPress={triggerSavePulse}
             delayLongPress={500}
           >
-            <Text style={[pageStyles.affirmText, { fontSize: fs, lineHeight: lh }]}>
-              {item.affirmation_text}
-            </Text>
+            <AutoFitText
+              text={item.affirmation_text}
+              available={textAvailable}
+              maxSize={46}
+              minSize={20}
+              lineHeightRatio={1.5}
+              style={pageStyles.affirmText}
+            />
           </TouchableOpacity>
         </Animated.View>
 
-        {/* Long-press hint — only shown once */}
+        {/* Long-press hint */}
         <Text style={pageStyles.hint}>
           {ttsAvailable ? 'Tap to hear · Hold to save' : 'Hold to save'}
         </Text>
@@ -320,7 +251,7 @@ const pageStyles = StyleSheet.create({
     letterSpacing: 1.2,
   },
 
-  actionWrap: { paddingTop: 16 },
+  actionWrap: { paddingTop: 14 },
 });
 
 // ── Dot indicators ─────────────────────────────────────────────────────────────
@@ -410,7 +341,8 @@ export function HomeScreen() {
   const load = useCallback(async () => {
     const existing = await getAffirmationsForDate(today);
     if (existing.length > 0) {
-      setItems(existing as AffirmItem[]);
+      // DB stores the reflection in `reason`; surface it as `reflection`.
+      setItems(existing.map(a => ({ ...a, reflection: a.reason ?? '' })) as AffirmItem[]);
       const checks = await Promise.all(existing.map(a => isFavorited(a.id)));
       const s = new Set<string>();
       existing.forEach((a, i) => { if (checks[i]) s.add(a.id); });
@@ -433,7 +365,12 @@ export function HomeScreen() {
     setGenerating(true);
     setGenerateError('');
     try {
-      const result = await generateAffirmation('daily');
+      const result = await generateAffirmation({
+        surface: 'home',
+        type: 'daily',
+        mode: 'daily',
+        excludeTexts: items.map(i => i.affirmation_text),
+      });
       const r = result as any;
       const newItem: AffirmItem = {
         id: r.id ?? String(Date.now()),
@@ -447,7 +384,6 @@ export function HomeScreen() {
         source: r.source ?? '',
       };
       setItems(prev => [...prev.filter(p => p.id !== '__gen__'), newItem]);
-      await scheduleDailyNotification(result.affirmation_text);
       if (!breathingShown.current) {
         breathingShown.current = true;
         setShowBreathing(true);
@@ -463,7 +399,12 @@ export function HomeScreen() {
     if (generating) return;
     setGenerating(true);
     try {
-      const result = await generateAffirmation('extra');
+      const result = await generateAffirmation({
+        surface: 'home',
+        type: 'extra',
+        mode: 'daily',
+        excludeTexts: items.map(i => i.affirmation_text),
+      });
       const r = result as any;
       const newItem: AffirmItem = {
         id: r.id ?? String(Date.now()),
