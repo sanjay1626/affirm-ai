@@ -8,6 +8,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { DiscoverScreen } from '../screens/DiscoverScreen';
 import { CategoryScreen } from '../screens/CategoryScreen';
 import { JournalScreen } from '../screens/JournalScreen';
+import { LibraryScreen } from '../screens/LibraryScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 
 export type HomeStackParamList = {
@@ -23,6 +24,7 @@ export type MainTabParamList = {
   HomeTab: undefined;
   DiscoverTab: undefined;
   JournalTab: undefined;
+  LibraryTab: undefined;
   ProfileTab: undefined;
 };
 
@@ -78,6 +80,17 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
     return (
       <View style={{ width: 16, height: 20, borderRadius: 2, borderWidth: 2, borderColor: color, justifyContent: 'center', alignItems: 'center', gap: 3 }}>
         {[0, 1, 2].map(i => <View key={i} style={{ width: 8, height: 1.5, backgroundColor: color }} />)}
+      </View>
+    );
+  }
+  if (name === 'library') {
+    return (
+      <View style={{ width: 20, height: 20, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2.5 }}>
+          <View style={{ width: 3.5, height: 16, borderRadius: 1, backgroundColor: color }} />
+          <View style={{ width: 3.5, height: 16, borderRadius: 1, backgroundColor: color }} />
+          <View style={{ width: 3.5, height: 16, borderRadius: 1, backgroundColor: color, transform: [{ rotate: '12deg' }] }} />
+        </View>
       </View>
     );
   }
@@ -139,6 +152,11 @@ export function MainTabNavigator() {
         name="JournalTab"
         component={JournalScreen}
         options={{ title: 'Journal', tabBarIcon: ({ focused }) => <TabIcon name="journal" focused={focused} /> }}
+      />
+      <Tab.Screen
+        name="LibraryTab"
+        component={LibraryScreen}
+        options={{ title: 'Library', tabBarIcon: ({ focused }) => <TabIcon name="library" focused={focused} /> }}
       />
       <Tab.Screen
         name="ProfileTab"

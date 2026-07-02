@@ -435,7 +435,10 @@ export function HomeScreen() {
       await removeFromFavorites(item.id);
       setSavedIds(prev => { const s = new Set(prev); s.delete(item.id); return s; });
     } else {
-      await addToFavorites(item.id, item.affirmation_text);
+      await addToFavorites(item.id, item.affirmation_text, {
+        category: item.category || undefined,
+        source: 'home',
+      });
       setSavedIds(prev => new Set(prev).add(item.id));
     }
   };

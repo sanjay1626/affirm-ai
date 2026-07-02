@@ -6,7 +6,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../services/supabase';
 import { schedulePracticeNotification, cancelAllNotifications } from '../services/notificationService';
-import { getStreak } from '../services/streakService';
+import {
+  getVoicePreference, setVoicePreference, speakText, ttsAvailable, type VoicePref,
+} from '../utils/speech';
 import { Colors } from '../utils/colors';
 import { AuroraBackground } from '../components/AuroraBackground';
 
@@ -29,29 +31,31 @@ function SectionHeader({ title }: { title: string }) {
 
 export function ProfileScreen() {
   const [email, setEmail] = useState('');
-  const [streak, setStreak] = useState(0);
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [notifTime, setNotifTime] = useState('08:00');
   const [editingTime, setEditingTime] = useState(false);
   const [timeInput, setTimeInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [voice, setVoice] = useState<VoicePref>(getVoicePreference());
+
+  const handleSelectVoice = async (pref: VoicePref) => {
+    setVoice(pref);
+    await setVoicePreference(pref);
+    if (ttsAvailable) speakText('This is your affirmation voice.');
+  };
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user?.email) setEmail(user.email);
 
-    const [streakVal, prefs] = await Promise.all([
-      getStreak(),
-      supabase
-        .from('notification_preferences')
-        .select('notification_time, enabled')
-        .eq('user_id', user?.id ?? '')
-        .maybeSingle(),
-    ]);
-    setStreak(streakVal);
-    if (prefs.data) {
-      setNotifEnabled(prefs.data.enabled ?? true);
-      setNotifTime(prefs.data.notification_time ?? '08:00');
+    const { data: prefs } = await supabase
+      .from('notification_preferences')
+      .select('notification_time, enabled')
+      .eq('user_id', user?.id ?? '')
+      .maybeSingle();
+    if (prefs) {
+      setNotifEnabled(prefs.enabled ?? true);
+      setNotifTime(prefs.notification_time ?? '08:00');
     }
   }, []);
 
@@ -112,8 +116,6 @@ export function ProfileScreen() {
     ]);
   };
 
-  const streakLabel = streak === 0 ? 'Start today' : streak === 1 ? '1 day' : `${streak} days`;
-
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
@@ -123,21 +125,6 @@ export function ProfileScreen() {
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.pageTitle}>Profile</Text>
-          </View>
-
-          {/* Streak card */}
-          <View style={styles.streakCard}>
-            <View style={styles.streakIconWrap}>
-              <Text style={styles.streakIcon}>🔥</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.streakCount}>{streakLabel}</Text>
-              <Text style={styles.streakSub}>
-                {streak === 0
-                  ? 'Generate your first affirmation to start a streak'
-                  : 'consecutive days — keep going'}
-              </Text>
-            </View>
           </View>
 
           {/* Notifications */}
@@ -188,6 +175,34 @@ export function ProfileScreen() {
             )}
           </View>
 
+          {/* Voice */}
+          <View style={styles.card}>
+            <SectionHeader title="Voice" />
+            <View style={styles.voiceRow}>
+              {([
+                { key: 'default', label: 'System Default' },
+                { key: 'woman', label: 'Woman' },
+                { key: 'man', label: 'Man' },
+              ] as { key: VoicePref; label: string }[]).map(opt => (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.voiceOption, voice === opt.key && styles.voiceOptionActive]}
+                  onPress={() => handleSelectVoice(opt.key)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.voiceOptionText, voice === opt.key && styles.voiceOptionTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.voiceHint}>
+              {ttsAvailable
+                ? 'Tap a voice to hear a sample. Woman and Man use a distinct device voice when available, and adjust tone otherwise.'
+                : 'Spoken affirmations are not available on this device.'}
+            </Text>
+          </View>
+
           {/* Account */}
           <View style={styles.card}>
             <SectionHeader title="Account" />
@@ -213,22 +228,6 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 8 },
   pageTitle: { fontSize: 30, fontWeight: '300', color: Colors.white90, letterSpacing: 0.2 },
 
-  streakCard: {
-    marginHorizontal: 24, marginTop: 24, marginBottom: 8,
-    backgroundColor: 'rgba(124,107,235,0.10)',
-    borderRadius: 16, borderWidth: 1, borderColor: 'rgba(124,107,235,0.22)',
-    padding: 20,
-    flexDirection: 'row', alignItems: 'center', gap: 16,
-  },
-  streakIconWrap: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: 'rgba(124,107,235,0.15)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  streakIcon: { fontSize: 24 },
-  streakCount: { fontSize: 22, fontWeight: '300', color: Colors.white90, letterSpacing: 0.2 },
-  streakSub: { fontSize: 13, fontWeight: '400', color: Colors.textSecondary, marginTop: 3 },
-
   card: {
     marginHorizontal: 24, marginTop: 20,
     backgroundColor: Colors.surface,
@@ -240,6 +239,16 @@ const styles = StyleSheet.create({
     letterSpacing: 2, textTransform: 'uppercase',
     paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6,
   },
+
+  voiceRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingTop: 4 },
+  voiceOption: {
+    flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: Colors.border,
+  },
+  voiceOptionActive: { backgroundColor: 'rgba(124,107,235,0.18)', borderColor: 'rgba(124,107,235,0.45)' },
+  voiceOptionText: { fontSize: 13, fontWeight: '500', color: Colors.textSecondary, textAlign: 'center' },
+  voiceOptionTextActive: { color: Colors.primaryLight },
+  voiceHint: { fontSize: 12, color: Colors.textMuted, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 16, lineHeight: 17 },
 
   row: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

@@ -188,12 +188,32 @@ export async function getAffirmationsForDate(date: string): Promise<Affirmation[
   return data ?? [];
 }
 
+/** Metadata stored alongside a saved item (powers the Library views). */
+export interface SaveMeta {
+  category?: string;
+  source?: 'home' | 'discover';
+  library_id?: string | null;
+}
+
+/** A row in the user's Saved collection (table is `favorites`, UI is "Saved"). */
+export interface SavedItem {
+  id: string;
+  affirmation_id: string | null;
+  affirmation_text: string;
+  category?: string | null;
+  source?: string | null;
+  library_id?: string | null;
+  created_at: string;
+}
+
 /**
- * Add an affirmation to favorites.
+ * Add an affirmation to the Saved collection.
+ * `meta` (category / source / library_id) is optional for backward-compat.
  */
 export async function addToFavorites(
   affirmationId: string,
-  affirmationText: string
+  affirmationText: string,
+  meta: SaveMeta = {}
 ): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
@@ -202,6 +222,9 @@ export async function addToFavorites(
     user_id: user.id,
     affirmation_id: affirmationId,
     affirmation_text: affirmationText,
+    category: meta.category ?? null,
+    source: meta.source ?? null,
+    library_id: meta.library_id ?? null,
   });
   if (error && !error.message.includes('duplicate')) {
     throw error;

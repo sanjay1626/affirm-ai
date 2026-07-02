@@ -80,12 +80,21 @@ export function CategoryScreen() {
     const k = keyOf(line);
     if (savedKeys.has(k)) return; // add-only (popularity signal)
     hapticSuccess();
-    setSavedKeys(prev => new Set(prev).add(k));
-    const id = await createAffirmationFromLibrary({
-      text: line.text, library_id: line.library_id, category: categoryId, reflection: triad?.reflection,
-    });
-    if (id) await addToFavorites(id, line.text);
-    await incrementLibrarySave(line.library_id);
+    setSavedKeys(prev => new Set(prev).add(k)); // optimistic
+    try {
+      // Lazy-create an `affirmations` row, then the `favorites` (Saved) row.
+      const id = await createAffirmationFromLibrary({
+        text: line.text, library_id: line.library_id, category: categoryId, reflection: triad?.reflection,
+      });
+      if (!id) throw new Error('Could not create affirmation row for save');
+      await addToFavorites(id, line.text, {
+        category: categoryId, source: 'discover', library_id: line.library_id,
+      });
+      await incrementLibrarySave(line.library_id);
+    } catch (e) {
+      console.warn('[Discover] save failed:', e);
+      setSavedKeys(prev => { const s = new Set(prev); s.delete(k); return s; }); // revert
+    }
   };
 
   const handleShare = async (line: LibraryLine) => {
@@ -185,20 +194,30 @@ export function CategoryScreen() {
             <Text style={styles.companionCaption}>ALSO FOR YOU</Text>
             {triad.companions.map((c) => {
               const k = keyOf(c);
+              const isSaved = savedKeys.has(k);
               return (
-                <TouchableOpacity
-                  key={k}
-                  style={styles.companionRow}
-                  activeOpacity={0.8}
-                  onPress={() => handleSpeak(c)}
-                  onLongPress={() => handleSave(c)}
-                  delayLongPress={500}
-                >
-                  <Text style={styles.companionText} numberOfLines={2}>{c.text}</Text>
-                  <Text style={[styles.companionMark, savedKeys.has(k) && styles.companionMarkSaved]}>
-                    {savedKeys.has(k) ? '♥' : '♡'}
-                  </Text>
-                </TouchableOpacity>
+                <View key={k} style={styles.companionRow}>
+                  {/* Tap text → TTS */}
+                  <TouchableOpacity
+                    style={styles.companionTextWrap}
+                    activeOpacity={0.7}
+                    onPress={() => handleSpeak(c)}
+                  >
+                    <Text style={styles.companionText} numberOfLines={2}>{c.text}</Text>
+                  </TouchableOpacity>
+                  {/* Tap heart → save only (its own touchable, so it doesn't trigger TTS) */}
+                  <TouchableOpacity
+                    style={styles.companionHeartBtn}
+                    activeOpacity={0.6}
+                    disabled={isSaved}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    onPress={() => handleSave(c)}
+                  >
+                    <Text style={[styles.companionMark, isSaved && styles.companionMarkSaved]}>
+                      {isSaved ? '♥' : '♡'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               );
             })}
 
@@ -279,16 +298,21 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: 2,
   },
   companionRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    marginHorizontal: 24, paddingVertical: 12, paddingHorizontal: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 24, paddingVertical: 8, paddingHorizontal: 8, paddingLeft: 16,
     borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
+  companionTextWrap: { flex: 1, paddingVertical: 4 },
   companionText: {
-    flex: 1, fontSize: 15, fontWeight: '300', fontStyle: 'italic',
+    fontSize: 15, fontWeight: '300', fontStyle: 'italic',
     color: 'rgba(255,255,255,0.82)', letterSpacing: 0.2,
   },
-  companionMark: { fontSize: 16, color: 'rgba(255,255,255,0.35)' },
+  companionHeartBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  companionMark: { fontSize: 18, color: 'rgba(255,255,255,0.40)' },
   companionMarkSaved: { color: 'rgba(255,255,255,0.95)' },
 
   moreBtn: {

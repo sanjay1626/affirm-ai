@@ -5,9 +5,13 @@ import * as Notifications from 'expo-notifications';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { AuthProvider } from './src/context/AuthContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { loadVoicePreference } from './src/utils/speech';
 
 export default function App() {
   const navigationRef = useRef<NavigationContainerRef<any>>(null);
+
+  // Load the saved voice preference so it applies to the first spoken affirmation.
+  useEffect(() => { loadVoicePreference(); }, []);
 
   // Handle notification taps (deep-link to the right screen)
   useEffect(() => {
